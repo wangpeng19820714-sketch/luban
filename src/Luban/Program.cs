@@ -277,11 +277,32 @@ internal static class Program
     private static Dictionary<string, string> BuildXargs(CommandOptions opts, LubanConfig config)
     {
         var xargs = ParseXargs(config.Xargs, opts.Xargs);
+        ValidateTextListRequiresAbtest(opts, xargs);
         if (IsAbtestExportEnabled(xargs))
         {
             xargs[BuiltinOptionNames.DataExporter] = "abtest";
         }
         return xargs;
+    }
+
+    private static void ValidateTextListRequiresAbtest(CommandOptions opts, Dictionary<string, string> xargs)
+    {
+        if (opts.DataTargets == null || !opts.DataTargets.Any(t => string.Equals(t, "text-list", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        string enableKey = $"{BuiltinOptionNames.AbtestFamily}.{BuiltinOptionNames.AbtestEnable}";
+        if (!xargs.TryGetValue(enableKey, out string enableValue) || !bool.TryParse(enableValue, out bool enabled) || !enabled)
+        {
+            throw new Exception("dataTarget 'text-list' requires '-x abtest.enable=true'");
+        }
+
+        string versionFieldKey = $"{BuiltinOptionNames.AbtestFamily}.{BuiltinOptionNames.AbtestVersionField}";
+        if (!xargs.TryGetValue(versionFieldKey, out string versionFieldValue) || !string.Equals(versionFieldValue?.Trim(), "ver", StringComparison.Ordinal))
+        {
+            throw new Exception("dataTarget 'text-list' requires '-x abtest.versionField=ver'");
+        }
     }
 
     private static bool IsAbtestExportEnabled(Dictionary<string, string> xargs)

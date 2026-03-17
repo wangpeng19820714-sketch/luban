@@ -27,6 +27,8 @@ namespace Luban.DataExporter.Builtin;
 [DataExporter("abtest")]
 public class AbtestDataExporter : DataExporterBase
 {
+    internal const string ActiveExportKey = "abtest.export.active";
+
     private static string GetDataTargetName(IDataTarget dataTarget)
     {
         return dataTarget.GetType().GetCustomAttribute<DataTargetAttribute>()?.Name
@@ -43,8 +45,10 @@ public class AbtestDataExporter : DataExporterBase
 
         if (dataTarget.AggregationType != AggregationType.Table)
         {
-            throw new NotSupportedException($"abtest exporter only supports table aggregation. dataTarget:{GetDataTargetName(dataTarget)}");
+            return;
         }
+
+        GenerationContext.Current.GetOrAddUniqueObject(ActiveExportKey, () => true);
 
         string dataTargetName = GetDataTargetName(dataTarget);
         List<DefTable> tables = dataTarget.ExportAllRecords ? ctx.Tables : ctx.ExportTables;

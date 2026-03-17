@@ -26,6 +26,7 @@ namespace Luban.OutputSaver;
 public class LocalFileSaver : OutputSaverBase
 {
     private static readonly NLog.Logger s_logger = NLog.LogManager.GetCurrentClassLogger();
+    private const string AbtestActiveExportKey = "abtest.export.active";
 
     private sealed class CleanupState
     {
@@ -44,7 +45,7 @@ public class LocalFileSaver : OutputSaverBase
         }
 
         var abtestOptions = AbtestExportUtil.GetOptions();
-        if (!abtestOptions.Enable || !abtestOptions.CleanUpOutputDir)
+        if (!abtestOptions.Enable || !abtestOptions.CleanUpOutputDir || GenerationContext.Current.TryGetUniqueObject(AbtestActiveExportKey) == null)
         {
             return;
         }

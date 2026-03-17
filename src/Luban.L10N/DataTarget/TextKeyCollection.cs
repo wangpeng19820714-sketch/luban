@@ -22,15 +22,30 @@ namespace Luban.L10N.DataTarget;
 
 public class TextKeyCollection
 {
-    private readonly HashSet<string> _keys = new();
+    private readonly Dictionary<string, string> _entries = new(StringComparer.Ordinal);
 
     public void AddKey(string key)
     {
-        if (!string.IsNullOrWhiteSpace(key))
-        {
-            _keys.Add(key);
-        }
+        AddEntry(key, key);
     }
 
-    public IEnumerable<string> Keys => _keys;
+    public void AddEntry(string key, string value)
+    {
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (_entries.TryGetValue(key, out string existingValue))
+        {
+            if (!string.Equals(existingValue, value, StringComparison.Ordinal))
+            {
+                throw new Exception($"duplicated text-list key:'{key}' with different text values. value1:'{existingValue}' value2:'{value}'");
+            }
+            return;
+        }
+        _entries.Add(key, value);
+    }
+
+    public IEnumerable<KeyValuePair<string, string>> Entries => _entries;
 }
