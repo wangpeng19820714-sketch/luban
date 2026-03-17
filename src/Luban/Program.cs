@@ -89,8 +89,6 @@ internal static class Program
         [Option('v', "verbose", Required = false, HelpText = "verbose")]
         public bool Verbose { get; set; }
 
-        [Option("abtestExport", Required = false, HelpText = "enable abtest incremental data export")]
-        public bool AbtestExport { get; set; }
     }
 
     private static ILogger s_logger;
@@ -279,12 +277,20 @@ internal static class Program
     private static Dictionary<string, string> BuildXargs(CommandOptions opts, LubanConfig config)
     {
         var xargs = ParseXargs(config.Xargs, opts.Xargs);
-        if (opts.AbtestExport)
+        if (IsAbtestExportEnabled(xargs))
         {
             xargs[BuiltinOptionNames.DataExporter] = "abtest";
-            xargs[$"{BuiltinOptionNames.AbtestFamily}.{BuiltinOptionNames.AbtestEnable}"] = "true";
         }
         return xargs;
+    }
+
+    private static bool IsAbtestExportEnabled(Dictionary<string, string> xargs)
+    {
+        if (!xargs.TryGetValue($"{BuiltinOptionNames.AbtestFamily}.{BuiltinOptionNames.AbtestEnable}", out string value))
+        {
+            return false;
+        }
+        return bool.TryParse(value, out bool enabled) && enabled;
     }
 
     private static Dictionary<string, string> ParseVariants(IEnumerable<string> variants)

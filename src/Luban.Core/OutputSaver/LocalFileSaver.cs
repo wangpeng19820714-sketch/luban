@@ -43,10 +43,8 @@ public class LocalFileSaver : OutputSaverBase
             FileCleaner.Clean(outputDir, normalFiles);
         }
 
-        var abtestFiles = outputFileManifest.DataFiles.Where(f => AbtestExportUtil.IsAbtestOutputFile(f.File))
-            .Select(f => AbtestExportUtil.StripAbtestPrefix(f.File))
-            .ToList();
-        if (abtestFiles.Count == 0 || !AbtestExportUtil.GetOptions().CleanUpOutputDir)
+        var abtestOptions = AbtestExportUtil.GetOptions();
+        if (!abtestOptions.Enable || !abtestOptions.CleanUpOutputDir)
         {
             return;
         }
@@ -60,7 +58,7 @@ public class LocalFileSaver : OutputSaverBase
             {
                 return;
             }
-            FileCleaner.Clean(abtestOutputDir, abtestFiles);
+            FileCleaner.Clean(abtestOutputDir, new List<string>());
             cleanupState.Cleaned = true;
         }
     }

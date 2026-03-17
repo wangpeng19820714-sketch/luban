@@ -61,15 +61,7 @@
 - `-d` 用于数据导出目标
 - `-x` 用于传入自定义扩展参数
 
-这意味着 ABTest 功能可以有两种实现路径：
-
-1. 新增显式命令行参数，例如 `--abtestExport`
-2. 继续沿用现有风格，通过 `-x abtest.xxx=yyy` 开启和配置
-
-结合当前工程风格，推荐方案是：
-
-- 增加一个显式开关参数，便于脚本使用
-- 具体目录、字段名等细项仍通过 `-x` 配置
+这意味着 ABTest 功能适合继续沿用现有风格，通过 `-x abtest.xxx=yyy` 开启和配置。
 
 ### 3.2 代码与数据是分离生成的
 
@@ -173,32 +165,13 @@
 
 ## 4.2 推荐命令设计
 
-推荐新增一个显式命令行参数：
-
-- `--abtestExport`
-
-含义：
-
-- 开启 ABTest 增量导表
-
-同时配套新增若干 `-x` 配置项：
+推荐通过 `-x` 配置项开启 ABTest：
 
 - `-x abtest.enable=true`
 - `-x abtest.versionField=version`
 - `-x abtest.outputDataDir=xxx`
-- `-x abtest.outputStrategy=subdir`
 
-最终建议保留两种开启方式，但内部统一收敛为同一个配置开关：
-
-- 命令行参数 `--abtestExport`
-- 或 `-x abtest.enable=true`
-
-推荐优先级：
-
-- 若传了 `--abtestExport`，内部强制视为开启
-- 若未传，则读取 `abtest.enable`
-
-这样脚本使用更直观，同时保留现有 `-x` 体系的一致性。
+只要最终 `abtest.enable=true`，内部就会自动切换到 `abtest` 数据导出器。
 
 ## 4.3 推荐脚本使用方式
 
@@ -211,7 +184,7 @@ dotnet Luban.dll ^
   -c cs-bin ^
   -d bin ^
   -d json ^
-  --abtestExport ^
+  -x abtest.enable=true ^
   -x outputCodeDir=%GEN_CODE_PATH% ^
   -x bin.outputDataDir=%GEN_DATA_PATH%/Bytes/ ^
   -x json.outputDataDir=%GEN_DATA_PATH%/Json/ ^
@@ -408,15 +381,13 @@ ABTest 模式下，记录唯一性不再只看主键本身，而是看：
 
 ## 5.4 推荐的核心实现步骤
 
-### 步骤 1：扩展命令行参数
+### 步骤 1：扩展配置读取
 
-在 [Program.cs](/e:/MYSELF/luban/src/Luban/Program.cs#L35) 的 `CommandOptions` 中增加：
-
-- `--abtestExport`
-
-并在启动时把该参数转换为内部配置，等价于：
+在 [Program.cs](/e:/MYSELF/luban/src/Luban/Program.cs#L35) 的参数汇总阶段读取：
 
 - `abtest.enable=true`
+
+并在启动时自动切换到 `abtest` 数据导出器。
 
 ### 步骤 2：新增 ABTest 配置读取工具
 
@@ -555,6 +526,7 @@ ABTest 导出目录建议独立清理，不要和主数据目录共用。
 - 主数据目录仍按原逻辑清理
 - 若开启 ABTest 且 `abtest.cleanUpOutputDir=true`
 - 则在本次导出开始前清空整个 `abtest.outputDataDir`
+- 无论本次是否实际生成 ABTest 增量文件，都执行上述清理
 
 注意：
 
@@ -765,12 +737,11 @@ ABTest 仅做“记录筛选导出”，不涉及 patch 合并逻辑。
 
 基于当前工程结构，最合适的落地方式是：
 
-1. 新增 `--abtestExport` 命令行开关。
-2. 新增 `abtest.*` 配置项。
-3. 在数据导出层新增一个 ABTest 专用 `DataExporter`。
-4. 主数据按现有逻辑导出。
-5. ABTest 增量数据基于最终记录集按 `version` 字段分桶后复用现有 `DataTarget` 导出。
-6. 代码生成链路不做任何改动。
+1. 新增 `abtest.*` 配置项。
+2. 在数据导出层新增一个 ABTest 专用 `DataExporter`。
+3. 主数据按现有逻辑导出。
+4. ABTest 增量数据基于最终记录集按 `version` 字段分桶后复用现有 `DataTarget` 导出。
+5. 代码生成链路不做任何改动。
 
 这是当前仓库下改动最小、与现有架构最一致、后续可维护性最好的一种方案。
 
