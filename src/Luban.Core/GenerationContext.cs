@@ -208,7 +208,7 @@ public class GenerationContext
 
     public List<Record> GetTableAllDataList(DefTable table)
     {
-        return _recordsByTables[table.FullName].FinalRecords;
+        return _recordsByTables[table.FullName].AllRecords;
     }
 
     public List<Record> GetTableExportDataList(DefTable table)

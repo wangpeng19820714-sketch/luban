@@ -27,19 +27,54 @@ public class LocalFileSaver : OutputSaverBase
 {
     private static readonly NLog.Logger s_logger = NLog.LogManager.GetCurrentClassLogger();
 
+    private sealed class CleanupState
+    {
+        public bool Cleaned { get; set; }
+    }
+
     protected override void BeforeSave(OutputFileManifest outputFileManifest, string outputDir)
     {
-        if (!EnvManager.Current.GetBoolOptionOrDefault($"{BuiltinOptionNames.OutputSaver}.{outputFileManifest.TargetName}", BuiltinOptionNames.CleanUpOutputDir,
-                true, true))
+        bool cleanMainOutput = EnvManager.Current.GetBoolOptionOrDefault($"{BuiltinOptionNames.OutputSaver}.{outputFileManifest.TargetName}", BuiltinOptionNames.CleanUpOutputDir,
+            true, true);
+
+        var normalFiles = outputFileManifest.DataFiles.Where(f => !AbtestExportUtil.IsAbtestOutputFile(f.File)).Select(f => f.File).ToList();
+        if (cleanMainOutput)
+        {
+            FileCleaner.Clean(outputDir, normalFiles);
+        }
+
+        var abtestFiles = outputFileManifest.DataFiles.Where(f => AbtestExportUtil.IsAbtestOutputFile(f.File))
+            .Select(f => AbtestExportUtil.StripAbtestPrefix(f.File))
+            .ToList();
+        if (abtestFiles.Count == 0 || !AbtestExportUtil.GetOptions().CleanUpOutputDir)
         {
             return;
         }
-        FileCleaner.Clean(outputDir, outputFileManifest.DataFiles.Select(f => f.File).ToList());
+
+        string abtestOutputDir = AbtestExportUtil.GetRequiredOutputDataDir();
+        string cleanupKey = $"abtest.cleanup.{abtestOutputDir}";
+        var cleanupState = (CleanupState)GenerationContext.Current.GetOrAddUniqueObject(cleanupKey, () => new CleanupState());
+        lock (cleanupState)
+        {
+            if (cleanupState.Cleaned)
+            {
+                return;
+            }
+            FileCleaner.Clean(abtestOutputDir, abtestFiles);
+            cleanupState.Cleaned = true;
+        }
     }
 
     public override void SaveFile(OutputFileManifest fileManifest, string outputDir, OutputFile outputFile)
     {
-        string fullOutputPath = $"{outputDir}/{outputFile.File}";
+        string relativePath = outputFile.File;
+        if (AbtestExportUtil.IsAbtestOutputFile(relativePath))
+        {
+            outputDir = AbtestExportUtil.GetRequiredOutputDataDir();
+            relativePath = AbtestExportUtil.StripAbtestPrefix(relativePath);
+        }
+
+        string fullOutputPath = $"{outputDir}/{relativePath}";
         Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath));
         string tag = File.Exists(fullOutputPath) ? "overwrite" : "new";
         if (FileUtil.WriteAllBytes(fullOutputPath, outputFile.GetContentBytes()))

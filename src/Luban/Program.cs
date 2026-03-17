@@ -88,6 +88,9 @@ internal static class Program
 
         [Option('v', "verbose", Required = false, HelpText = "verbose")]
         public bool Verbose { get; set; }
+
+        [Option("abtestExport", Required = false, HelpText = "enable abtest incremental data export")]
+        public bool AbtestExport { get; set; }
     }
 
     private static ILogger s_logger;
@@ -139,7 +142,7 @@ internal static class Program
 
 
             var launcher = new SimpleLauncher();
-            launcher.Start(ParseXargs(config.Xargs, opts.Xargs));
+            launcher.Start(BuildXargs(opts, config));
             AddCustomTemplateDirs(opts.CustomTemplateDirs);
 
             var pipeline = PipelineManager.Ins.CreatePipeline(opts.Pipeline);
@@ -271,6 +274,17 @@ internal static class Program
             defaultXargsMap[kv.Key] = kv.Value;
         }
         return defaultXargsMap;
+    }
+
+    private static Dictionary<string, string> BuildXargs(CommandOptions opts, LubanConfig config)
+    {
+        var xargs = ParseXargs(config.Xargs, opts.Xargs);
+        if (opts.AbtestExport)
+        {
+            xargs[BuiltinOptionNames.DataExporter] = "abtest";
+            xargs[$"{BuiltinOptionNames.AbtestFamily}.{BuiltinOptionNames.AbtestEnable}"] = "true";
+        }
+        return xargs;
     }
 
     private static Dictionary<string, string> ParseVariants(IEnumerable<string> variants)

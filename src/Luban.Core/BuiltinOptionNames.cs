@@ -75,4 +75,14 @@ public static class BuiltinOptionNames
     public const string LineEnding = "lineEnding";
 
     public const string FileEncoding = "fileEncoding";
+
+    public const string AbtestFamily = "abtest";
+
+    public const string AbtestEnable = "enable";
+
+    public const string AbtestVersionField = "versionField";
+
+    public const string AbtestOutputDataDir = "outputDataDir";
+
+    public const string AbtestCleanUpOutputDir = "cleanUpOutputDir";
 }

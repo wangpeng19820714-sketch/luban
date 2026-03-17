@@ -35,15 +35,20 @@ public class TableDataInfo
 
     public List<Record> FinalRecords { get; private set; }
 
+    public IReadOnlyDictionary<string, List<Record>> AbtestRecordsByVersion { get; private set; } = new Dictionary<string, List<Record>>();
+
+    public List<Record> AllRecords => _allRecords ??= FinalRecords.Concat(AbtestRecordsByVersion.Values.SelectMany(v => v)).ToList();
+
     public Dictionary<DType, Record> FinalRecordMap { get; private set; }
 
     public Dictionary<string, Dictionary<DType, Record>> FinalRecordMapByIndexs { get; private set; }
 
+    private List<Record> _allRecords;
+
     public TableDataInfo(DefTable table, List<Record> mainRecords, List<Record> patchRecords)
     {
         Table = table;
-        MainRecords = mainRecords;
-        PatchRecords = patchRecords;
+        (MainRecords, PatchRecords, AbtestRecordsByVersion) = SplitAbtestRecords(table, mainRecords, patchRecords);
 
         BuildIndexs();
 
@@ -200,6 +205,130 @@ public class TableDataInfo
             }
             default:
                 throw new Exception($"unknown mode:{Table.Mode}");
+        }
+
+        AppendAbtestValidationIndexes();
+    }
+
+    private (List<Record> MainRecords, List<Record> PatchRecords, IReadOnlyDictionary<string, List<Record>> AbtestRecordsByVersion) SplitAbtestRecords(
+        DefTable table, List<Record> mainRecords, List<Record> patchRecords)
+    {
+        if (!AbtestExportUtil.IsEnabled() || !AbtestExportUtil.TryGetVersionField(table, out _, out int versionFieldIndex))
+        {
+            return (mainRecords, patchRecords, new Dictionary<string, List<Record>>());
+        }
+
+        var versionedRecordsByVersion = new Dictionary<string, List<Record>>(StringComparer.Ordinal);
+        var duplicateCheck = new Dictionary<string, Record>(StringComparer.Ordinal);
+        var baseMainRecords = new List<Record>();
+        var basePatchRecords = patchRecords != null ? new List<Record>() : null;
+        int rowIndex = 0;
+
+        CollectAbtestRecords(table, mainRecords, versionFieldIndex, versionedRecordsByVersion, duplicateCheck, baseMainRecords, rowIndex);
+        rowIndex += mainRecords.Count;
+        if (patchRecords != null)
+        {
+            CollectAbtestRecords(table, patchRecords, versionFieldIndex, versionedRecordsByVersion, duplicateCheck, basePatchRecords, rowIndex);
+        }
+
+        return (baseMainRecords, basePatchRecords, versionedRecordsByVersion);
+    }
+
+    private void CollectAbtestRecords(DefTable table, List<Record> sourceRecords, int versionFieldIndex,
+        Dictionary<string, List<Record>> versionedRecordsByVersion, Dictionary<string, Record> duplicateCheck, List<Record> baseRecords, int startRowIndex)
+    {
+        for (int i = 0; i < sourceRecords.Count; i++)
+        {
+            var record = sourceRecords[i];
+            string version = AbtestExportUtil.NormalizeVersionValue(table, record, versionFieldIndex);
+            if (version.Length == 0)
+            {
+                baseRecords.Add(record);
+                continue;
+            }
+
+            string businessKey = BuildAbtestBusinessKey(table, record, startRowIndex + i);
+            string duplicateKey = $"{businessKey}@@{version}";
+            if (duplicateCheck.TryGetValue(duplicateKey, out var existing))
+            {
+                throw new Exception($@"配置表 '{table.FullName}' key:'{businessKey}' version:'{version}' 重复.
+        记录1 来自文件:{existing.Source}
+        记录2 来自文件:{record.Source}
+");
+            }
+
+            duplicateCheck.Add(duplicateKey, record);
+            if (!versionedRecordsByVersion.TryGetValue(version, out var records))
+            {
+                records = new List<Record>();
+                versionedRecordsByVersion.Add(version, records);
+            }
+            records.Add(record);
+        }
+    }
+
+    private static string BuildAbtestBusinessKey(DefTable table, Record record, int rowIndex)
+    {
+        switch (table.Mode)
+        {
+            case TableMode.ONE:
+                return "__one__";
+            case TableMode.MAP:
+                return record.Data.Fields[table.IndexFieldIdIndex].ToString();
+            case TableMode.LIST:
+            {
+                if (table.IndexList.Count == 0)
+                {
+                    return $"__row__{rowIndex}";
+                }
+                if (table.IndexList.Count == 1)
+                {
+                    return record.Data.Fields[table.IndexList[0].IndexFieldIdIndex].ToString();
+                }
+                return string.Join("|", table.IndexList.Select(idx => $"{idx.IndexField.Name}={record.Data.Fields[idx.IndexFieldIdIndex]}"));
+            }
+            default:
+                throw new Exception($"unknown mode:{table.Mode}");
+        }
+    }
+
+    private void AppendAbtestValidationIndexes()
+    {
+        if (AbtestRecordsByVersion.Count == 0)
+        {
+            return;
+        }
+
+        switch (Table.Mode)
+        {
+            case TableMode.MAP:
+            {
+                FinalRecordMap ??= new Dictionary<DType, Record>();
+                foreach (var record in AbtestRecordsByVersion.Values.SelectMany(v => v))
+                {
+                    var key = record.Data.Fields[Table.IndexFieldIdIndex];
+                    FinalRecordMap.TryAdd(key, record);
+                }
+                break;
+            }
+            case TableMode.LIST:
+            {
+                FinalRecordMapByIndexs ??= new Dictionary<string, Dictionary<DType, Record>>();
+                foreach (var indexInfo in Table.IndexList)
+                {
+                    if (!FinalRecordMapByIndexs.TryGetValue(indexInfo.IndexField.Name, out var recordMap))
+                    {
+                        recordMap = new Dictionary<DType, Record>();
+                        FinalRecordMapByIndexs.Add(indexInfo.IndexField.Name, recordMap);
+                    }
+                    foreach (var record in AbtestRecordsByVersion.Values.SelectMany(v => v))
+                    {
+                        var key = record.Data.Fields[indexInfo.IndexFieldIdIndex];
+                        recordMap.TryAdd(key, record);
+                    }
+                }
+                break;
+            }
         }
     }
 }
