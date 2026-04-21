@@ -62,6 +62,8 @@ public static class BuiltinOptionNames
 
     public const string L10NTextListFile = "textListFile";
 
+    public const string L10NExistingTextListFile = "existingTextListFile";
+
     public const string TypeMapperType = "type";
 
     public const string TypeMapperConstructor = "constructor";

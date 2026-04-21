@@ -18,16 +18,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using Luban.DataLoader;
 using Luban.DataTarget;
 using Luban.Datas;
 using Luban.Defs;
+using Luban.RawDefs;
 using Luban.Types;
+using Luban.Utils;
 
 namespace Luban.L10N.DataTarget;
 
 [DataTarget("text-list")]
 internal class TextKeyListDataTarget : DataTargetBase
 {
+    private static readonly NLog.Logger s_logger = NLog.LogManager.GetCurrentClassLogger();
+
     protected override string DefaultOutputFileExt => "txt";
 
     public override bool ExportAllRecords => true;
@@ -47,7 +52,10 @@ internal class TextKeyListDataTarget : DataTargetBase
             CollectTableTextEntries(table, textCollection);
         }
 
+        HashSet<string> existingKeys = LoadExistingTextKeys();
+
         var lines = textCollection.Entries
+            .Where(kv => !existingKeys.Contains(kv.Key))
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .Select(kv => $"{kv.Key}\t{EscapeTextValue(kv.Value)}");
         var content = string.Join("\n", lines);
@@ -55,6 +63,98 @@ internal class TextKeyListDataTarget : DataTargetBase
         string outputFile = EnvManager.Current.GetOption(BuiltinOptionNames.L10NFamily, BuiltinOptionNames.L10NTextListFile, false);
 
         return CreateOutputFile(outputFile, content);
+    }
+
+    private static HashSet<string> LoadExistingTextKeys()
+    {
+        var existingKeys = new HashSet<string>(StringComparer.Ordinal);
+        EnvManager env = EnvManager.Current;
+
+        if (!env.TryGetOption(BuiltinOptionNames.L10NFamily, BuiltinOptionNames.L10NExistingTextListFile, false, out string filePath)
+            || string.IsNullOrWhiteSpace(filePath))
+        {
+            return existingKeys;
+        }
+
+        (string actualFile, string sheetName) = FileUtil.SplitFileAndSheetName(FileUtil.Standardize(filePath));
+        if (!File.Exists(actualFile))
+        {
+            s_logger.Warn("l10n.{} file:'{}' not found, skip incremental filtering", BuiltinOptionNames.L10NExistingTextListFile, actualFile);
+            return existingKeys;
+        }
+
+        string ext = Path.GetExtension(actualFile).ToLowerInvariant();
+        if (ext == ".txt")
+        {
+            LoadExistingKeysFromTxt(actualFile, existingKeys);
+        }
+        else
+        {
+            string keyFieldName = env.GetOptionOrDefault(BuiltinOptionNames.L10NFamily, BuiltinOptionNames.L10NTextFileKeyFieldName, false, "key");
+            LoadExistingKeysFromTable(actualFile, sheetName, keyFieldName, existingKeys);
+        }
+
+        s_logger.Info("text-list incremental filter: loaded {} existing keys from '{}'", existingKeys.Count, actualFile);
+        return existingKeys;
+    }
+
+    private static void LoadExistingKeysFromTxt(string filePath, HashSet<string> existingKeys)
+    {
+        foreach (string line in File.ReadAllLines(filePath))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+            int tabIndex = line.IndexOf('\t');
+            string key = (tabIndex >= 0 ? line.Substring(0, tabIndex) : line).Trim();
+            if (!string.IsNullOrEmpty(key))
+            {
+                existingKeys.Add(key);
+            }
+        }
+    }
+
+    private static void LoadExistingKeysFromTable(string filePath, string sheetName, string keyFieldName, HashSet<string> existingKeys)
+    {
+        var ass = new DefAssembly(new RawAssembly()
+        {
+            Targets = new List<RawTarget> { new() { Name = "default", Manager = "Tables" } },
+        }, "default", new List<string>(), null, null);
+
+        var defTableRecordType = new DefBean(new RawBean()
+        {
+            Namespace = "__intern__",
+            Name = "__ExistingTextEntry__",
+            Parent = "",
+            Alias = "",
+            IsValueType = false,
+            Sep = "",
+            Fields = new List<RawField> { new() { Name = keyFieldName, Type = "string" } },
+        })
+        {
+            Assembly = ass,
+        };
+
+        ass.AddType(defTableRecordType);
+        defTableRecordType.PreCompile();
+        defTableRecordType.Compile();
+        defTableRecordType.PostCompile();
+        var tableRecordType = TBean.Create(false, defTableRecordType, null);
+
+        var records = DataLoaderManager.Ins.LoadTableFile(tableRecordType, filePath, sheetName, new Dictionary<string, string>());
+        foreach (var r in records)
+        {
+            DBean data = r.Data;
+            if (data.GetField(keyFieldName) is DString keyData)
+            {
+                string key = keyData.Value?.Trim();
+                if (!string.IsNullOrEmpty(key))
+                {
+                    existingKeys.Add(key);
+                }
+            }
+        }
     }
 
     private static void CollectTableTextEntries(DefTable table, TextKeyCollection textCollection)
