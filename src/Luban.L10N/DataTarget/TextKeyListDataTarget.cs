@@ -90,12 +90,27 @@ internal class TextKeyListDataTarget : DataTargetBase
         }
         else
         {
-            string keyFieldName = env.GetOptionOrDefault(BuiltinOptionNames.L10NFamily, BuiltinOptionNames.L10NTextFileKeyFieldName, false, "key");
+            string keyFieldName = ResolveExistingKeyFieldName(env);
             LoadExistingKeysFromTable(actualFile, sheetName, keyFieldName, existingKeys);
         }
 
         s_logger.Info("text-list incremental filter: loaded {} existing keys from '{}'", existingKeys.Count, actualFile);
         return existingKeys;
+    }
+
+    private static string ResolveExistingKeyFieldName(EnvManager env)
+    {
+        if (env.TryGetOption(BuiltinOptionNames.L10NFamily, BuiltinOptionNames.L10NExistingKeyFieldName, false, out string dedicated)
+            && !string.IsNullOrWhiteSpace(dedicated))
+        {
+            return dedicated;
+        }
+        if (env.TryGetOption(BuiltinOptionNames.L10NFamily, BuiltinOptionNames.L10NTextFileKeyFieldName, false, out string fallback)
+            && !string.IsNullOrWhiteSpace(fallback))
+        {
+            return fallback;
+        }
+        return "key";
     }
 
     private static void LoadExistingKeysFromTxt(string filePath, HashSet<string> existingKeys)
@@ -160,12 +175,12 @@ internal class TextKeyListDataTarget : DataTargetBase
     private static void CollectTableTextEntries(DefTable table, TextKeyCollection textCollection)
     {
         var records = GenerationContext.Current.GetTableAllDataList(table);
-        TryGetVersionField(table, out int versionFieldIndex);
+        TextKeyBuilder.TryGetVersionField(table, out int versionFieldIndex);
         for (int i = 0; i < records.Count; i++)
         {
             var record = records[i];
-            string version = GetVersion(record, versionFieldIndex);
-            string recordKey = BuildRecordKey(table, record, i);
+            string version = TextKeyBuilder.GetVersion(record, versionFieldIndex);
+            string recordKey = TextKeyBuilder.BuildRecordKey(table, record, i);
             CollectDataTextEntries(textCollection, table.OutputDataFile, recordKey, version, record.Data, table.ValueTType, null);
         }
     }
@@ -177,9 +192,9 @@ internal class TextKeyListDataTarget : DataTargetBase
             case null:
                 return;
             case DString textData when type.HasTag("text"):
-                textCollection.AddEntry(BuildTextKey(tableName, fieldPath, version, recordKey), textData.Value);
+                textCollection.AddEntry(TextKeyBuilder.BuildTextKey(tableName, fieldPath, version, recordKey), textData.Value);
                 return;
-            case DBean beanData when type is TBean beanType:
+            case DBean beanData when type is TBean:
             {
                 var fields = beanData.ImplType.HierarchyFields;
                 for (int i = 0; i < beanData.Fields.Count; i++)
@@ -190,7 +205,7 @@ internal class TextKeyListDataTarget : DataTargetBase
                         continue;
                     }
                     var field = fields[i];
-                    string childPath = string.IsNullOrEmpty(fieldPath) ? field.Name : $"{fieldPath}_{field.Name}";
+                    string childPath = TextKeyBuilder.AppendFieldPath(fieldPath, field.Name);
                     CollectDataTextEntries(textCollection, tableName, recordKey, version, fieldValue, field.CType, childPath);
                 }
                 return;
@@ -216,76 +231,13 @@ internal class TextKeyListDataTarget : DataTargetBase
             case DMap mapData when type is TMap mapType:
                 foreach (var kv in mapData.DataMap)
                 {
-                    CollectDataTextEntries(textCollection, tableName, recordKey, version, kv.Key, mapType.KeyType, AppendFieldPath(fieldPath, "key"));
-                    CollectDataTextEntries(textCollection, tableName, recordKey, version, kv.Value, mapType.ValueType, AppendFieldPath(fieldPath, "value"));
+                    CollectDataTextEntries(textCollection, tableName, recordKey, version, kv.Key, mapType.KeyType, TextKeyBuilder.AppendFieldPath(fieldPath, "key"));
+                    CollectDataTextEntries(textCollection, tableName, recordKey, version, kv.Value, mapType.ValueType, TextKeyBuilder.AppendFieldPath(fieldPath, "value"));
                 }
                 return;
             default:
                 return;
         }
-    }
-
-    private static string BuildTextKey(string tableName, string fieldPath, string version, string recordKey)
-    {
-        if (string.IsNullOrWhiteSpace(fieldPath))
-        {
-            throw new Exception($"table:'{tableName}' text field path is empty");
-        }
-        return string.IsNullOrWhiteSpace(version)
-            ? $"{SanitizeKeySegment(tableName)}_{SanitizeKeySegment(fieldPath)}_{SanitizeKeySegment(recordKey)}"
-            : $"{SanitizeKeySegment(tableName)}_{SanitizeKeySegment(fieldPath)}_{SanitizeKeySegment(version)}_{SanitizeKeySegment(recordKey)}";
-    }
-
-    private static string AppendFieldPath(string fieldPath, string segment)
-    {
-        return string.IsNullOrWhiteSpace(fieldPath) ? segment : $"{fieldPath}_{segment}";
-    }
-
-    private static string BuildRecordKey(DefTable table, Record record, int rowIndex)
-    {
-        return table.Mode switch
-        {
-            TableMode.ONE => "one",
-            TableMode.MAP => ConvertKeyValueToString(record.Data.Fields[table.IndexFieldIdIndex]),
-            TableMode.LIST when table.IndexList.Count == 0 => $"row{rowIndex}",
-            TableMode.LIST when table.IndexList.Count == 1 => ConvertKeyValueToString(record.Data.Fields[table.IndexList[0].IndexFieldIdIndex]),
-            TableMode.LIST => string.Join("_", table.IndexList.Select(idx => $"{idx.IndexField.Name}={ConvertKeyValueToString(record.Data.Fields[idx.IndexFieldIdIndex])}")),
-            _ => throw new Exception($"unknown table mode:{table.Mode}"),
-        };
-    }
-
-    private static bool TryGetVersionField(DefTable table, out int fieldIndex)
-    {
-        if (table.ValueTType.DefBean.TryGetField("ver", out var field, out fieldIndex)
-            || table.ValueTType.DefBean.TryGetField("version", out field, out fieldIndex))
-        {
-            if (field.CType is not TString)
-            {
-                throw new Exception($"table:'{table.FullName}' field:'{field.Name}' must be string when generating text-list");
-            }
-            return true;
-        }
-        fieldIndex = -1;
-        return false;
-    }
-
-    private static string GetVersion(Record record, int fieldIndex)
-    {
-        if (fieldIndex < 0)
-        {
-            return string.Empty;
-        }
-        return record.Data.Fields[fieldIndex] is DString value ? value.Value?.Trim() ?? string.Empty : string.Empty;
-    }
-
-    private static string SanitizeKeySegment(string segment)
-    {
-        return (segment ?? string.Empty)
-            .Trim()
-            .Replace('\r', '_')
-            .Replace('\n', '_')
-            .Replace('\t', '_')
-            .Replace(' ', '_');
     }
 
     private static string EscapeTextValue(string value)
@@ -295,21 +247,5 @@ internal class TextKeyListDataTarget : DataTargetBase
             .Replace("\t", "\\t")
             .Replace("\r", "\\r")
             .Replace("\n", "\\n");
-    }
-
-    private static string ConvertKeyValueToString(DType value)
-    {
-        return value switch
-        {
-            null => string.Empty,
-            DString s => s.Value ?? string.Empty,
-            DInt i => i.Value.ToString(),
-            DLong l => l.Value.ToString(),
-            DShort s => s.Value.ToString(),
-            DByte b => b.Value.ToString(),
-            DBool b => b.Value ? "true" : "false",
-            DEnum e => e.ToString(),
-            _ => value.ToString(),
-        };
     }
 }

@@ -56,6 +56,8 @@ public static class BuiltinOptionNames
 
     public const string L10NTextFileLanguageFieldName = "textFile.languageFieldName";
 
+    public const string L10NTextFileLookupMode = "textFile.lookupMode";
+
     public const string L10NConvertTextKeyToValue = "convertTextKeyToValue";
 
     //public const string L10NUnknownTextKeyListOutputFile = "unknownTextKeyListOutputFile";
@@ -63,6 +65,8 @@ public static class BuiltinOptionNames
     public const string L10NTextListFile = "textListFile";
 
     public const string L10NExistingTextListFile = "existingTextListFile";
+
+    public const string L10NExistingKeyFieldName = "existingKeyFieldName";
 
     public const string TypeMapperType = "type";
 
